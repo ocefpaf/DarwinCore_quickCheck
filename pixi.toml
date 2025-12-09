@@ -1,9 +1,9 @@
 [workspace]
-authors = ["Filipe Fernandes <ocefpaf@gmail.com>"]
+authors = ["Mathew Biddle <mathew.biddle@noaa.gov>"]
 channels = ["conda-forge"]
-name = "DarwinCore_quickCheck"
-platforms = ["linux-64"]
-version = "0.1.0"
+name = "Darwin Core Quick Checks"
+platforms = ["linux-64", "osx-64", "win-64"]
+version = "1.0.0"
 
 [tasks]
 
