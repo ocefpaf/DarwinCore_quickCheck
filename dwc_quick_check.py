@@ -1,4 +1,4 @@
-# FF: Make every test a pass/fail for the HTML report.
+# TODO: Make every test a pass/fail for the HTML report.
 # Some of the second phase tests are blocked if the data does not align, but can run them
 # anyway to return a more meaningful report?
 
@@ -44,83 +44,52 @@ This performs the following checks:
 import pandas as pd
 import requests
 import time
-
+import logging
 from pathlib import Path
 
-test_dir = Path("bad_data")
+logger = logging.getLogger(__name__)
+
+# test_dir = Path("bad_data")
 test_dir = Path("good_data")
 
+# TODO: Web version add 3 boxes for each upload.
+# TODO: Use nametuple to track dfs.
+# TODO: Remove prints in lieu for logging and use the messages in the report.
 df_event = pd.read_csv(test_dir.joinpath("event_bd.csv"))
 df_occurrence = pd.read_csv(test_dir.joinpath("occurrence_bd.csv"))
 df_emof = pd.read_csv(test_dir.joinpath("emof_bd.csv"))
 
-# FF: Before merging we can be more explicitly and not rely on pandas API in case that change.
-assert len(set(df_event["eventID"])) == len(df_event)
-assert sorted(set(df_event["eventID"])) == sorted(set(df_occurrence["eventID"]))
 
-
-# First check: Merge tables
-def test_merge_tables(df, other, on, validate="one_to_many"):
-    # “one_to_many” or “1:m”: check if merge keys are unique in left dataset.
-    df_out = None
+# 01 - First check: Merge tables.
+def check_merge_tables(df_event, df_occurrence, df_emof):
+    """Using `one_to_many` to check if merge keys are unique in left dataset."""
+    df_event_occur_emof = None
+    print(f"event: {df_event.shape}")
+    print(f"occurrence: {df_occurrence.shape}")
+    print(f"emof: {df_emof.shape}")
     try:
-        df_out = df.merge(other, on=on, validate="one_to_many")
+        df_event_occur = df_event.merge(
+            df_occurrence, on="eventID", validate="one_to_many"
+        )
+        df_event_occur_emof = df_event_occur.merge(
+            df_emof, on="occurrenceID", validate="one_to_many", suffixes=(None, None)
+        )
     except pd.errors.MergeError as err:
-        print(f"Failed Merging DataFrames {df} and {other}.\n{err}")
-    return df_out
+        print(f"Failed Merging DataFrames. \n{err}")
+    return df_event_occur_emof
 
 
-df_event_occur = test_merge_tables(df=df_event, other=df_occurrence, on="eventID")
-if df_event_occur is not None:
-    # suffixes=(None, None)
-    df_event_occur_emof = test_merge_tables(
-        df=df_event_occur, other=df_emof, on="occurrenceID"
-    )
+required_occurrence_columns = [
+    "occurrenceID",
+    "scientificName",
+    "eventDate",
+    "decimalLatitude",
+    "decimalLongitude",
+    "basisOfRecord",
+    "occurrenceStatus",
+]
 
-# We should report these shapes in the HTML.
-print(f"event: {df_event.shape}")
-print(f"occurrence: {df_occurrence.shape}")
-print(f"emof: {df_emof.shape}")
-
-
-# FF: Are this always the same fix or should we just report and leave it to the user?
-# # Here are some hacks to make it work.
-# df_event_occur = df_event.drop_duplicates(subset="eventID", keep="last").merge(
-#     df_occurrence,
-#     on="eventID",
-#     validate="one_to_many",
-# )
-
-
-# df_event_occur_emof = df_event_occur.drop_duplicates(
-#     subset="occurrenceID", keep="first"
-# ).merge(
-#     df_emof.drop(columns=["eventID"]),
-#     on="occurrenceID",
-#     validate="one_to_many",
-#     suffixes=(None, None),
-# )
-
-# if df_event_occur_emof.shape[0] == df_emof.shape[0]:
-#     print(
-#         f"Successfully arranged event files!\nevent + occurrence + emof = {df_event_occur_emof.shape}"
-#     )
-# else:
-#     print("Problems matching event, occurrence, and emof")
-
-
-# FF: Unused
-# required_occ_terms = [
-#     "occurrenceID",
-#     "scientificName",
-#     "eventDate",
-#     "decimalLatitude",
-#     "decimalLongitude",
-#     "basisOfRecord",
-#     "occurrenceStatus",
-# ]
-
-required_emof_terms = [
+required_emof_columns = [
     "eventID",
     "occurrenceID",
     "measurementValue",
@@ -128,7 +97,7 @@ required_emof_terms = [
     "measurementUnit",
 ]
 
-required_event_terms = [
+required_event_columns = [
     "eventID",
     "eventDate",
     "decimalLatitude",
@@ -137,35 +106,30 @@ required_event_terms = [
     "geodeticDatum",
 ]
 
-# Unless we will need to check independent tables, this step is unnecessary and we can
-# create a single list.
-required_terms = set(required_event_terms + required_emof_terms)
 
-
-def test_required_columns(df):
+def check_required_columns(df, columns):
     print("🔍 Checking structure...")
-    missing_cols = [col for col in required_terms if col not in df.columns]
+    missing_cols = list(set(columns).difference(df.columns))
 
     if missing_cols:
         print(f"Missing required DwC columns: {', '.join(missing_cols)}")
-    else:
-        print("All core DwC columns are present.")
+        return False
+    return True
 
 
-def test_null_values(df):
+def check_null_values(df, columns):
     print("🔍 Checking completeness...")
-    for col in required_terms:
-        if col in df.columns:
-            missing = df[df[col].isna()]
-            if not missing.empty:
-                print(
-                    'WARNING", f"Column "{col}" has {len(missing)} missing values.',
-                    missing.index.tolist(),
-                )
+    missing = df.columns[df.isna().any()].to_list()
+    if missing:
+        print(f"WARNING! Columns {missing} have missing values.")
+        print(f"WARNING! Columns {missing} have missing values.")
+        return False
+    return True
 
 
-def validate_coordinates(df):
+def check_coordinates(df):
     print("🔍 Checking coordinates...")
+    res = True
     if "decimalLatitude" in df.columns:
         invalid_lat = df[
             pd.to_numeric(df["decimalLatitude"], errors="coerce").isna()
@@ -174,10 +138,9 @@ def validate_coordinates(df):
         ]
         if not invalid_lat.empty:
             print(
-                "CRITICAL",
-                "Invalid decimalLatitude values detected.",
-                invalid_lat.index.tolist(),
+                f"CRITICAL! Invalid decimalLatitude values detected. {invalid_lat.index.tolist()}"
             )
+            res = False
 
     if "decimalLongitude" in df.columns:
         invalid_lon = df[
@@ -187,77 +150,69 @@ def validate_coordinates(df):
         ]
         if not invalid_lon.empty:
             print(
-                "CRITICAL",
-                "Invalid decimalLongitude values detected.",
-                invalid_lon.index.tolist(),
+                f"CRITICAL! Invalid decimalLongitude values detected. {invalid_lon.index.tolist()}"
             )
+            res = False
+    return res
 
 
-# AQUATIC SPECIFIC CHECKS.
-def depth_consistency_checks(df):
+def check_depth_consistency(df):
     print("🌊 Checking aquatic depth logic...")
-    # FF: If these are mandatory columns, should they be in the check above?
-    # Or do we need to disambiguate Errors from Warnings in the HTML report?
-    has_min = "minimumDepthInMeters" in df.columns
-    has_max = "maximumDepthInMeters" in df.columns
-
-    if not has_min and not has_max:
+    res = True
+    if ("minimumDepthInMeters", "maximumDepthInMeters") not in df.columns:
         print(
-            "WARNING",
-            "No depth information found (minimumDepthInMeters/maximumDepthInMeters).",
+            "WARNING! No depth information found (minimumDepthInMeters/maximumDepthInMeters)."
         )
-    if has_min:
-        non_numeric_min = df[
-            pd.to_numeric(df["minimumDepthInMeters"], errors="coerce").isna()
-        ]
-        if not non_numeric_min.empty:
-            print(
-                "WARNING",
-                "Non-numeric values in minimumDepthInMeters",
-                non_numeric_min.index.tolist(),
-            )
-    # Checking for numeric values with coerce can hide issues with the data.
-    # Example: pd.to_numeric(["1", "3.14", "nan", "ana"], errors="coerce")
-    # You do want to coerce NaN, but do you want to coerce Ana?
-    if has_min and has_max:
-        # Check logic: Min should not be greater than Max
-        # We use pd.to_numeric to ensure we aren't comparing strings
-        # This should be done at loading time, pandas can be used as a linter there
-        # and enforce dtypes
-        min_d = pd.to_numeric(df["minimumDepthInMeters"], errors="coerce")
-        max_d = pd.to_numeric(df["maximumDepthInMeters"], errors="coerce")
+        # We return here b/c we cannot run the tests below without these columns.
+        return False
 
-        illogical = df[(min_d > max_d) & min_d.notna() & max_d.notna()]
+    min_depth = pd.to_numeric(df["minimumDepthInMeters"], errors="coerce")
+    if not min_depth.isna().empty:
+        print(
+            f"WARNING! Non-numeric values in minimumDepthInMeters {min_depth.index.tolist()}"
+        )
+        res = False
 
-        if not illogical.empty:
-            print(
-                "CRITICAL",
-                "minimumDepthInMeters is greater than maximumDepthInMeters",
-                illogical.index.tolist(),
-            )
+    max_depth = pd.to_numeric(df["minimumDepthInMeters"], errors="coerce")
+    if not max_depth.isna().empty:
+        print(
+            f"WARNING! Non-numeric values in minimumDepthInMeters {max_depth.index.tolist()}"
+        )
+        res = False
+
+    # Check logic: Min should not be greater than Max
+    illogical = all(min_depth > max_depth)
+
+    if not illogical.empty:
+        print(
+            f"CRITICAL! minimumDepthInMeters is greater than maximumDepthInMeters {illogical.tolist()}"
+        )
+        res = False
+    return res
 
 
-def validate_scientific_names(df):
+def check_scientific_names(df):
     # TODO: Refactor with memoize and individual name check in the memoized function
     # for speed and server side optiomization.
-    # FF: If these are mandatory columns, should they be in the check above?
+    # TODO: If these are mandatory columns, should they be in the check above?
     # Or do we need to disambiguate Errors from Warnings in the HTML report?
-    if "scientificName" not in df_event_occur_emof.columns:
+    if "scientificName" not in df.columns:
         print("Missing scientificName.")
+        return
 
     print("🐠 Verifying taxonomy with WoRMS API (this may take a moment)...")
-    # FF: Should this be exact or fuzzy?
+    # TODO: Should this be exact or fuzzy?
     # For example, we have 'polychaeta spp. 1' and 'polychaeta spp. 2' there.
-    unique_names = df_event_occur_emof["scientificName"].dropna().unique().tolist()
+    unique_names = df["scientificName"].dropna().unique().tolist()
     # WoRMS AphiaRecordsByMatchNames endpoint
     url = "https://www.marinespecies.org/rest/AphiaRecordsByMatchNames"
 
     # Process in chunks of 50 to avoid timeouts
     chunk_size = 50
-    # invalid_taxa = []  # FF: Unused
+    # invalid_taxa = []  # TODO: Unused
     unmatched_taxa = []
 
-    # FF: Gemini thinks this is matlab!?
+    # TODO: Gemini thinks this is matlab!?
     for i in range(0, len(unique_names), chunk_size):
         chunk = unique_names[i : i + chunk_size]
         try:
@@ -294,8 +249,22 @@ def validate_scientific_names(df):
         )
 
 
-test_required_columns(df_event_occur_emof)
-test_null_values(df_event_occur_emof)
-validate_coordinates(df_event_occur_emof)
-depth_consistency_checks(df_event_occur_emof)
-validate_scientific_names(df_event_occur_emof)
+for name, df, cols in zip(
+    ["event", "occurrence", "emof"],
+    [df_event, df_occurrence, df_emof],
+    [required_event_columns, required_occurrence_columns, required_emof_columns],
+):
+    # TODO: When using namedtuple we can skip tests that won't pass, like checking for depth in dfs that should not have it.
+    print(f"Started {name}.")
+    res = [
+        check_required_columns(df, columns=cols),
+        check_null_values(df, columns=cols),
+        check_coordinates(df),
+        check_depth_consistency(df),
+    ]
+    print(res)
+    print(f"Finished {name}.")
+
+    check_scientific_names(df)
+
+check_merge_tables(df_event=df_event, df_occurrence=df_occurrence, df_emof=df_emof)
