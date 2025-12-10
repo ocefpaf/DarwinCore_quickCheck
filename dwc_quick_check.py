@@ -132,8 +132,8 @@ def check_coordinates(df):
     if "decimalLatitude" in df.columns:
         invalid_lat = df[
             pd.to_numeric(df["decimalLatitude"], errors="coerce").isna()
-            | (df["decimalLatitude"] < -90)
-            | (df["decimalLatitude"] > 90)
+            | (df["decimalLatitude"] <= -90)
+            | (df["decimalLatitude"] >= 90)
         ]
         if not invalid_lat.empty:
             logging.info(
@@ -144,8 +144,8 @@ def check_coordinates(df):
     if "decimalLongitude" in df.columns:
         invalid_lon = df[
             pd.to_numeric(df["decimalLongitude"], errors="coerce").isna()
-            | (df["decimalLongitude"] < -180)
-            | (df["decimalLongitude"] > 180)
+            | (df["decimalLongitude"] <= -180)
+            | (df["decimalLongitude"] >= 180)
         ]
         if not invalid_lon.empty:
             logging.info(
