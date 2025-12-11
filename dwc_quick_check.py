@@ -43,6 +43,8 @@ This performs the following checks:
 
 import functools
 
+import stamina
+
 import pandas as pd
 import requests
 import logging
@@ -200,14 +202,12 @@ def check_scientific_names(df):
     names = df["scientificName"].to_list()
 
     # TODO: Gemini thinks this is matlab!?
-    return [_check_scientific_name(name) for name in names]
+    return [check_scientific_name(name) for name in names]
 
 
 @functools.lru_cache(maxsize=128)
-def _check_scientific_name(name):
-    url = "https://www.marinespecies.org/rest/AphiaRecordsByMatchNames"
-    params = {"scientificnames[]": name, "marine_only": "true"}
-    response = requests.get(url, params=params)
+def check_scientific_name(name):
+    response = _check_scientific_name(name)
 
     if response.status_code == 200:
         results = response.json()
@@ -227,6 +227,13 @@ def _check_scientific_name(name):
         )
         return False
     return True
+
+
+@stamina.retry(on=requests.exceptions.HTTPError, attempts=3)
+def _check_scientific_name(name):
+    url = "https://www.marinespecies.org/rest/AphiaRecordsByMatchNames"
+    params = {"scientificnames[]": name, "marine_only": "true"}
+    return requests.get(url, params=params)
 
 
 for name, df, cols in zip(
