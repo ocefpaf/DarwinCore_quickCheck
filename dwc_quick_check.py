@@ -173,9 +173,10 @@ def check_scientific_names(df):
     if "scientificName" not in df.columns:
         return [None, "⚠️  Missing the `scientificName` column!"]
 
-    names = df["scientificName"].to_list()
+    names = list(set(df["scientificName"]))
 
-    return [check_scientific_name(name) for name in names]
+    results = [check_scientific_name(name) for name in names]
+    return [msg for res, msg in results if not res]
 
 
 @functools.lru_cache(maxsize=128)
@@ -184,25 +185,25 @@ def check_scientific_name(name):
 
     # Bail early to avoid unnecessary retries.
     if response.status_code == 204 or response.status_code == 400:
-        return False, f"⚠️  {response.status_code=} for {name}=."
+        return False, f"⚠️  {response.status_code=} for {name=}."
 
     if response.status_code == 200:
         results = response.json()
     else:
-        msg = f"⚠️  WoRMS API Error: {response.status_code} for {name}="
+        msg = f"⚠️  WoRMS API Error: {response.status_code} for {name=}"
         return False, msg
 
     # The API returns a list of lists (one list per name queried).
-    is_unique = "✅ Found 1 match!"
+    is_unique = f"Found 1 match for {name=}"
     if len(results) > 1:
-        is_unique = "⚠️  Found more than 1 match, selecting the first one"
+        is_unique = "⚠️  Found more than 1 match for {name=}, selecting the first one"
 
     # Take first match.
     result = results[0]
     if result["status"] != "accepted":
-        msg = f"{is_unique}\n⚠️  Taxon {name} is {result['status']}. Accepted name: {result['valid_name']}, {result['url']}"
+        msg = f"{is_unique}\n⚠️  Taxon {result['status']=}. Accepted name: {result['valid_name']=}, {result['url']=}"
         return False, msg
-    return True, f"{is_unique} for {name=}."
+    return True, f"{is_unique}."
 
 
 @stamina.retry(on=requests.exceptions.HTTPError, attempts=3)
@@ -240,4 +241,4 @@ if __name__ == "__main__":
     print(msg)
 
     results = check_scientific_names(df)
-    [print(msg) for res, msg in results]
+    [print(msg) for msg in results]
