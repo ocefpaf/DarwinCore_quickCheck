@@ -24,13 +24,12 @@ DataFrames.
 
 """
 
-# TODO: Make every test a pass/fail for the HTML report.
-
 import functools
 
 import stamina
 
 import pandas as pd
+import janitor  # noqa: F401
 import requests
 from pathlib import Path
 
@@ -69,18 +68,24 @@ required_columns = (
 
 def check_merge_tables(df_event, df_occurrence, df_emof):
     """Using `one_to_many` to check if merge keys are unique in left dataset."""
-    df_event_occur_emof = None
+    df = None
     try:
+        msg = "✅ Merge tables passed!"
         df_event_occur = df_event.merge(
             df_occurrence, on="eventID", validate="one_to_many"
         )
-        df_event_occur_emof = df_event_occur.merge(
-            df_emof, on="occurrenceID", validate="one_to_many", suffixes=(None, None)
+        if df_event_occur.empty:
+            msg = f"❌ Merge tables failed.\nCould not merge {set(df_event['eventID'])}\non\n{set(df_occurrence['eventID'])}."
+            return df, msg
+        df = df_event_occur.merge(
+            df_emof, on="occurrenceID", validate="one_to_many", suffixes=(None, "r_")
         )
-        msg = "✅ Merge tables passed!"
+        if df.empty:
+            msg = f"❌ Merge tables failed.\nCould not merge {set(df_occurrence['occurrenceID'])}\non\n{set(df_emof['occurrenceID'])}."
+            return df, msg
     except pd.errors.MergeError as err:
         msg = f"❌ Merge tables failed. \n{err}"
-    return df_event_occur_emof, msg
+    return df, msg
 
 
 def check_required_columns(df, columns):
@@ -96,7 +101,7 @@ def check_required_columns(df, columns):
 def check_null_values(df, columns):
     missing = df.columns[df.isna().any()].to_list()
     res = True
-    msg = "✅ Passed null values check.!"
+    msg = "✅ Passed null values check!"
     if missing:
         msg = f"⚠️  Columns {missing} have missing values."
         res = False
@@ -104,32 +109,34 @@ def check_null_values(df, columns):
 
 
 def check_latitude(df):
-    if "decimalLatitude" in df.columns:
-        res = True
-        msg = "✅ Passed `decimalLatitude` bounds!"
-        invalid_lat = df[
-            pd.to_numeric(df["decimalLatitude"], errors="coerce").isna()
-            | (df["decimalLatitude"] <= -90)
-            | (df["decimalLatitude"] >= 90)
-        ]
-        if not invalid_lat.empty:
-            msg = f"❌ Invalid `decimalLatitude` values detected. {invalid_lat.index.tolist()}"
-            res = False
+    res = True
+    msg = "✅ Passed `decimalLatitude` bounds!"
+    if "decimalLatitude" not in df.columns:
+        return False, "⚠️  Cannot find `decimalLatitude` column."
+    invalid_lat = df[
+        pd.to_numeric(df["decimalLatitude"], errors="coerce").isna()
+        | (df["decimalLatitude"] <= -90)
+        | (df["decimalLatitude"] >= 90)
+    ]
+    if not invalid_lat.empty:
+        msg = f"❌ Invalid `decimalLatitude` values detected. {invalid_lat.index.tolist()}"
+        res = False
     return res, msg
 
 
 def check_longitude(df):
-    if "decimalLongitude" in df.columns:
-        res = True
-        msg = "✅ Passed `decimalLongitude` bounds!"
-        invalid_lon = df[
-            pd.to_numeric(df["decimalLongitude"], errors="coerce").isna()
-            | (df["decimalLongitude"] <= -180)
-            | (df["decimalLongitude"] >= 180)
-        ]
-        if not invalid_lon.empty:
-            msg = f" Invalid decimalLongitude values detected. {invalid_lon.index.tolist()}"
-            res = False
+    res = True
+    msg = "✅ Passed `decimalLongitude` bounds!"
+    if "decimalLongitude" not in df.columns:
+        return False, "⚠️  Cannot find `decimalLongitude` column."
+    invalid_lon = df[
+        pd.to_numeric(df["decimalLongitude"], errors="coerce").isna()
+        | (df["decimalLongitude"] <= -180)
+        | (df["decimalLongitude"] >= 180)
+    ]
+    if not invalid_lon.empty:
+        msg = f" Invalid decimalLongitude values detected. {invalid_lon.index.tolist()}"
+        res = False
     return res, msg
 
 
@@ -214,31 +221,48 @@ def _check_scientific_name(name):
 
 if __name__ == "__main__":
     # TODO: Web version add 3 boxes for each upload.
-    # test_dir = Path("bad_data")
-    test_dir = Path("good_data")
-    df_event = pd.read_csv(test_dir.joinpath("event_bd.csv"))
-    df_occurrence = pd.read_csv(test_dir.joinpath("occurrence_bd.csv"))
-    df_emof = pd.read_csv(test_dir.joinpath("emof_bd.csv"))
+    # test_dir = Path("tests/data/bad_data")
+    test_dir = Path("tests/data/good_data")
+    # test_dir = Path("tests/data/encoding_issues")
+
+    kw = {"encoding_errors": "ignore"}
+    clean_names = {
+        "axis": "columns",
+        "strip_underscores": True,
+        "case_type": "preserve",
+        "remove_special": True,
+    }
+
+    df_event = pd.read_csv(test_dir.joinpath("event_bd.csv"), **kw).clean_names(
+        **clean_names
+    )
+    df_occurrence = pd.read_csv(
+        test_dir.joinpath("occurrence_bd.csv"), **kw
+    ).clean_names(**clean_names)
+    df_emof = pd.read_csv(test_dir.joinpath("emof_bd.csv"), **kw).clean_names(
+        **clean_names
+    )
 
     df, msg = check_merge_tables(
         df_event=df_event, df_occurrence=df_occurrence, df_emof=df_emof
     )
     print(msg)
 
-    res, msg = check_required_columns(df, columns=required_columns)
-    print(msg)
+    if df is not None:
+        res, msg = check_required_columns(df, columns=required_columns)
+        print(msg)
 
-    res, msg = check_null_values(df, columns=required_columns)
-    print(msg)
+        res, msg = check_null_values(df, columns=required_columns)
+        print(msg)
 
-    res, msg = check_latitude(df)
-    print(msg)
+        res, msg = check_latitude(df)
+        print(msg)
 
-    res, msg = check_longitude(df)
-    print(msg)
+        res, msg = check_longitude(df)
+        print(msg)
 
-    res, msg = check_depth_consistency(df)
-    print(msg)
+        res, msg = check_depth_consistency(df)
+        print(msg)
 
-    results = check_scientific_names(df)
-    [print(msg) for msg in results]
+        results = check_scientific_names(df)
+        [print(msg) for msg in results]
